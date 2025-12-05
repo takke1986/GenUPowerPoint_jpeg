@@ -10,6 +10,9 @@ type Props = BaseProps & {
   size: 's' | 'm';
   error?: boolean;
   onDelete?: () => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onSelectChange?: (selected: boolean) => void;
 };
 
 const ZoomUpVideo: React.FC<Props> = (props) => {
@@ -18,16 +21,27 @@ const ZoomUpVideo: React.FC<Props> = (props) => {
   return (
     <div className={props.className}>
       <div className="group relative cursor-pointer">
+        {props.selectable && (
+          <input
+            type="checkbox"
+            checked={props.selected}
+            onChange={(e) => props.onSelectChange?.(e.target.checked)}
+            className="absolute left-1 top-1 z-10 h-4 w-4 cursor-pointer"
+            onClick={(e) => e.stopPropagation()}
+          />
+        )}
         <video
           className={`${
-            props.error ? 'border-red-500' : 'border-aws-squid-ink/50'
+            props.error ? 'border-red-500' : props.selected ? 'border-blue-500 border-2' : 'border-aws-squid-ink/50'
           } bg-aws-squid-ink/20 rounded border object-cover object-center ${
             props.size === 's' ? 'size-24' : 'size-32'
           }`}
           src={props.src}
           controls
           onClick={() => {
-            setZoom(true);
+            if (!props.selectable) {
+              setZoom(true);
+            }
           }}
         />
         {(props.loading || props.deleting) && (
@@ -35,7 +49,7 @@ const ZoomUpVideo: React.FC<Props> = (props) => {
             <PiSpinnerGap className="animate-spin text-4xl text-white" />
           </div>
         )}
-        {props.onDelete && !props.loading && (
+        {props.onDelete && !props.loading && !props.selectable && (
           <ButtonIcon
             className={`invisible absolute right-0 top-0 m-0.5 border bg-white text-xs group-hover:visible `}
             onClick={props.onDelete}>
