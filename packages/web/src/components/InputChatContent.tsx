@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ButtonSend from './ButtonSend';
 import ButtonToggle from './ButtonToggle';
 import Textarea from './Textarea';
@@ -14,6 +14,9 @@ import {
   PiSpinnerGap,
   PiSlidersHorizontal,
   PiClockCountdownLight,
+  PiTrash,
+  PiCheckSquare,
+  PiSquare,
 } from 'react-icons/pi';
 import useFiles from '../hooks/useFiles';
 import FileCard from './FileCard';
@@ -70,6 +73,10 @@ const InputChatContent: React.FC<Props> = (props) => {
     errorMessages,
   } = useFiles(pathname);
 
+  // Selection mode state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
+
   // When the model is changed, etc., display the error message (do not automatically delete the file)
   useEffect(() => {
     if (props.fileLimit && props.accept) {
@@ -93,6 +100,43 @@ const InputChatContent: React.FC<Props> = (props) => {
     },
     [deleteUploadedFile, props.fileLimit, props.accept]
   );
+
+  // Toggle selection mode
+  const toggleSelectionMode = useCallback(() => {
+    setSelectionMode((prev) => !prev);
+    setSelectedFileIds(new Set());
+  }, []);
+
+  // Toggle file selection
+  const toggleFileSelection = useCallback((fileId: string) => {
+    setSelectedFileIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(fileId)) {
+        newSet.delete(fileId);
+      } else {
+        newSet.add(fileId);
+      }
+      return newSet;
+    });
+  }, []);
+
+  // Select all files
+  const selectAllFiles = useCallback(() => {
+    const allIds = new Set(uploadedFiles.map((f) => f.id).filter((id): id is string => !!id));
+    setSelectedFileIds(allIds);
+  }, [uploadedFiles]);
+
+  // Delete selected files
+  const deleteSelectedFiles = useCallback(async () => {
+    if (props.fileLimit && props.accept) {
+      const filesToDelete = Array.from(selectedFileIds);
+      for (const fileId of filesToDelete) {
+        await deleteUploadedFile(fileId, props.fileLimit, props.accept);
+      }
+      setSelectedFileIds(new Set());
+      setSelectionMode(false);
+    }
+  }, [selectedFileIds, deleteUploadedFile, props.fileLimit, props.accept]);
   const handlePaste = async (pasteEvent: React.ClipboardEvent) => {
     const fileList = pasteEvent.clipboardData.items || [];
     const files = Array.from(fileList)
@@ -140,53 +184,87 @@ const InputChatContent: React.FC<Props> = (props) => {
         }`}>
         <div className="flex grow flex-col">
           {props.fileUpload && uploadedFiles.length > 0 && (
-            <div className="flex flex-wrap gap-2 p-2">
-              {uploadedFiles.map((uploadedFile, idx) => {
-                if (uploadedFile.type === 'image') {
-                  return (
-                    <ZoomUpImage
-                      key={idx}
-                      src={uploadedFile.base64EncodedData}
-                      loading={uploadedFile.uploading}
-                      deleting={uploadedFile.deleting}
-                      size="s"
-                      error={uploadedFile.errorMessages.length > 0}
-                      onDelete={() => {
-                        deleteFile(uploadedFile.id ?? '');
-                      }}
-                    />
-                  );
-                } else if (uploadedFile.type === 'video') {
-                  return (
-                    <ZoomUpVideo
-                      key={idx}
-                      src={uploadedFile.base64EncodedData}
-                      loading={uploadedFile.uploading}
-                      deleting={uploadedFile.deleting}
-                      size="s"
-                      error={uploadedFile.errorMessages.length > 0}
-                      onDelete={() => {
-                        deleteFile(uploadedFile.id ?? '');
-                      }}
-                    />
-                  );
-                } else {
-                  return (
-                    <FileCard
-                      key={idx}
-                      filename={uploadedFile.name}
-                      loading={uploadedFile.uploading}
-                      deleting={uploadedFile.deleting}
-                      size="s"
-                      error={uploadedFile.errorMessages.length > 0}
-                      onDelete={() => {
-                        deleteFile(uploadedFile.id ?? '');
-                      }}
-                    />
-                  );
-                }
-              })}
-            </div>
+            <>
+              <div className="flex items-center gap-2 p-2 border-b border-gray-200">
+                <ButtonIcon
+                  onClick={toggleSelectionMode}
+                  className={`${selectionMode ? 'bg-blue-100 border-blue-500' : 'bg-white'} border`}>
+                  {selectionMode ? <PiCheckSquare className="text-blue-600" /> : <PiSquare />}
+                </ButtonIcon>
+                {selectionMode && (
+                  <>
+                    <Button
+                      onClick={selectAllFiles}
+                      className="text-xs py-1 px-2">
+                      すべて選択
+                    </Button>
+                    <Button
+                      onClick={deleteSelectedFiles}
+                      disabled={selectedFileIds.size === 0}
+                      className="text-xs py-1 px-2 bg-red-500 hover:bg-red-600 text-white disabled:bg-gray-300">
+                      <PiTrash className="inline mr-1" />
+                      選択を削除 ({selectedFileIds.size})
+                    </Button>
+                  </>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2 p-2">
+                {uploadedFiles.map((uploadedFile, idx) => {
+                  if (uploadedFile.type === 'image') {
+                    return (
+                      <ZoomUpImage
+                        key={idx}
+                        src={uploadedFile.base64EncodedData}
+                        loading={uploadedFile.uploading}
+                        deleting={uploadedFile.deleting}
+                        size="s"
+                        error={uploadedFile.errorMessages.length > 0}
+                        selectable={selectionMode}
+                        selected={selectedFileIds.has(uploadedFile.id ?? '')}
+                        onSelectChange={() => toggleFileSelection(uploadedFile.id ?? '')}
+                        onDelete={() => {
+                          deleteFile(uploadedFile.id ?? '');
+                        }}
+                      />
+                    );
+                  } else if (uploadedFile.type === 'video') {
+                    return (
+                      <ZoomUpVideo
+                        key={idx}
+                        src={uploadedFile.base64EncodedData}
+                        loading={uploadedFile.uploading}
+                        deleting={uploadedFile.deleting}
+                        size="s"
+                        error={uploadedFile.errorMessages.length > 0}
+                        selectable={selectionMode}
+                        selected={selectedFileIds.has(uploadedFile.id ?? '')}
+                        onSelectChange={() => toggleFileSelection(uploadedFile.id ?? '')}
+                        onDelete={() => {
+                          deleteFile(uploadedFile.id ?? '');
+                        }}
+                      />
+                    );
+                  } else {
+                    return (
+                      <FileCard
+                        key={idx}
+                        filename={uploadedFile.name}
+                        loading={uploadedFile.uploading}
+                        deleting={uploadedFile.deleting}
+                        size="s"
+                        error={uploadedFile.errorMessages.length > 0}
+                        selectable={selectionMode}
+                        selected={selectedFileIds.has(uploadedFile.id ?? '')}
+                        onSelectChange={() => toggleFileSelection(uploadedFile.id ?? '')}
+                        onDelete={() => {
+                          deleteFile(uploadedFile.id ?? '');
+                        }}
+                      />
+                    );
+                  }
+                })}
+              </div>
+            </>
           )}
           {errorMessages.length > 0 && (
             <div className="m-2 flex flex-wrap gap-2">

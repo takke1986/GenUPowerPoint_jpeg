@@ -10,6 +10,8 @@ export const DocumentMimeType = {
   HTML: 'text/html',
   TXT: 'text/plain',
   MD: 'text/markdown',
+  PPT: 'application/vnd.ms-powerpoint',
+  PPTX: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 } as const;
 export type DocumentMimeType =
   (typeof DocumentMimeType)[keyof typeof DocumentMimeType];
@@ -25,6 +27,8 @@ export const documentMimeTypeToExtensions: Record<DocumentMimeType, string[]> =
     [DocumentMimeType.HTML]: ['html'],
     [DocumentMimeType.TXT]: ['txt'],
     [DocumentMimeType.MD]: ['md'],
+    [DocumentMimeType.PPT]: ['ppt'],
+    [DocumentMimeType.PPTX]: ['pptx'],
   };
 
 // Image
