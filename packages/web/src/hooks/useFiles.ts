@@ -312,7 +312,7 @@ const useFilesState = create<{
           const signedUrl = signedUrlRes.data;
           const fileUrl = extractBaseURL(signedUrl); // Remove query parameters from signed URL
           // Upload file
-          api.uploadFile(signedUrl, { file: uploadedFile.file }).then(() => {
+          api.uploadFile(signedUrl, { file: uploadedFile.file }).then(async () => {
             const currentIdx = get().uploadedFilesDict[id].findIndex(
               (file) => file.id === uploadedFile.id
             ); // If the previous file is deleted during upload, the idx changes
@@ -326,6 +326,122 @@ const useFilesState = create<{
                 };
               })
             );
+
+            // Check if file is PowerPoint and convert to JPEG
+            const isPowerPoint = ['ppt', 'pptx'].includes(mediaFormat.toLowerCase());
+            if (isPowerPoint) {
+              // Extract bucket name and file key from fileUrl
+              const urlMatch = /https:\/\/(.+?)\.s3\.(.+?)\.amazonaws\.com\/(.+)/.exec(fileUrl);
+              if (urlMatch) {
+                const bucketName = urlMatch[1];
+                const fileKey = decodeURIComponent(urlMatch[3]);
+
+                // Set converting state
+                set(
+                  produce((state) => {
+                    state.uploadedFilesDict[id][currentIdx].uploading = true;
+                  })
+                );
+
+                try {
+                  // Call conversion API
+                  const conversionResult = await api.convertPptxToJpeg({
+                    bucketName,
+                    fileKey,
+                    fileName: uploadedFile.file.name,
+                  });
+
+                  if (conversionResult.data.error) {
+                    // Conversion error - add error message
+                    set(
+                      produce((state) => {
+                        state.uploadedFilesDict[id][currentIdx].uploading = false;
+                        state.uploadedFilesDict[id][currentIdx].errorMessages = [
+                          conversionResult.data.error || 'PowerPointの変換に失敗しました'
+                        ];
+                        state.errorMessagesDict[id] = [
+                          ...(state.errorMessagesDict[id] || []),
+                          conversionResult.data.error || 'PowerPointの変換に失敗しました'
+                        ];
+                      })
+                    );
+                  } else {
+                    // Conversion successful - remove original PowerPoint and add converted images
+                    const images = conversionResult.data.images || [];
+
+                    // Remove the PowerPoint file
+                    const updatedFiles = get().uploadedFilesDict[id].filter(
+                      (file) => file.id !== uploadedFile.id
+                    );
+
+                    // Create uploaded file objects for each converted image
+                    const convertedImageFiles: UploadedFileType[] = await Promise.all(
+                      images.map(async (img) => {
+                        const imageUrl = `https://${bucketName}.s3.${urlMatch[2]}.amazonaws.com/${img.s3Key}`;
+                        // Download image for preview
+                        try {
+                          const response = await fetch(imageUrl);
+                          const blob = await response.blob();
+                          const reader = new FileReader();
+                          const base64Data = await new Promise<string>((resolve) => {
+                            reader.onloadend = () => resolve(reader.result as string);
+                            reader.readAsDataURL(blob);
+                          });
+
+                          return {
+                            id: `${uploadedFile.id}_slide_${img.slideNumber}`,
+                            file: new File([blob], img.fileName, { type: 'image/jpeg' }),
+                            name: img.fileName,
+                            type: 'image' as const,
+                            mimeType: 'image/jpeg' as any,
+                            uploading: false,
+                            s3Url: imageUrl,
+                            base64EncodedData: base64Data,
+                            errorMessages: [],
+                          } as UploadedFileType;
+                        } catch (error) {
+                          console.error('Failed to fetch converted image:', error);
+                          return null;
+                        }
+                      })
+                    );
+
+                    // Filter out failed downloads
+                    const validImageFiles = convertedImageFiles.filter(
+                      (f): f is UploadedFileType => f !== null
+                    );
+
+                    // Update state with converted images
+                    set(
+                      produce((state) => {
+                        state.uploadedFilesDict[id] = [...updatedFiles, ...validImageFiles];
+                        // Cache base64 data
+                        validImageFiles.forEach((imgFile) => {
+                          if (imgFile.s3Url && imgFile.base64EncodedData) {
+                            state.base64Cache[imgFile.s3Url] = imgFile.base64EncodedData;
+                          }
+                        });
+                      })
+                    );
+                  }
+                } catch (error) {
+                  console.error('PowerPoint conversion error:', error);
+                  // Conversion API error - add error message
+                  set(
+                    produce((state) => {
+                      state.uploadedFilesDict[id][currentIdx].uploading = false;
+                      state.uploadedFilesDict[id][currentIdx].errorMessages = [
+                        'PowerPointの変換中にエラーが発生しました'
+                      ];
+                      state.errorMessagesDict[id] = [
+                        ...(state.errorMessagesDict[id] || []),
+                        'PowerPointの変換中にエラーが発生しました'
+                      ];
+                    })
+                  );
+                }
+              }
+            }
           });
         });
     });
