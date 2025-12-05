@@ -1,4 +1,4 @@
-import { Stack, Duration, RemovalPolicy } from 'aws-cdk-lib';
+import { Stack, Duration, RemovalPolicy, Size } from 'aws-cdk-lib';
 import {
   AuthorizationType,
   CognitoUserPoolsAuthorizer,
@@ -12,6 +12,7 @@ import { UserPool, UserPoolClient } from 'aws-cdk-lib/aws-cognito';
 import { IFunction } from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { DockerImageFunction, DockerImageCode } from 'aws-cdk-lib/aws-lambda';
 import { Table } from 'aws-cdk-lib/aws-dynamodb';
 import { IdentityPool } from 'aws-cdk-lib/aws-cognito-identitypool';
 import {
@@ -26,6 +27,7 @@ import {
   BucketEncryption,
   HttpMethods,
 } from 'aws-cdk-lib/aws-s3';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import {
   Agent,
   AgentInfo,
@@ -830,6 +832,47 @@ export class Api extends Construct {
     table.grantReadData(getTokenUsageFunction);
     props.statsTable.grantReadData(getTokenUsageFunction);
 
+    // PowerPoint to JPEG converter (Python Lambda with LibreOffice)
+    const pptxConverterFunction = new DockerImageFunction(
+      this,
+      'PptxConverterFunction',
+      {
+        code: DockerImageCode.fromImageAsset(
+          './lambda-python/pptx-converter',
+          {
+            platform: Platform.LINUX_AMD64,
+          }
+        ),
+        timeout: Duration.minutes(5),
+        memorySize: 3008,
+        ephemeralStorageSize: Size.gibibytes(10),
+        environment: {
+          BUCKET_NAME: fileBucket.bucketName,
+        },
+      }
+    );
+    fileBucket.grantReadWrite(pptxConverterFunction);
+
+    // PowerPoint conversion API handler
+    const convertPptxToJpegFunction = new NodejsFunction(
+      this,
+      'ConvertPptxToJpeg',
+      {
+        runtime: LAMBDA_RUNTIME_NODEJS,
+        entry: './lambda/convertPptxToJpeg.ts',
+        timeout: Duration.minutes(6),
+        environment: {
+          CONVERTER_FUNCTION_ARN: pptxConverterFunction.functionArn,
+        },
+        bundling: {
+          nodeModules: ['@aws-sdk/client-lambda'],
+        },
+        vpc,
+        securityGroups,
+      }
+    );
+    pptxConverterFunction.grantInvoke(convertPptxToJpegFunction);
+
     // API Gateway
     const authorizer = new CognitoUserPoolsAuthorizer(this, 'Authorizer', {
       cognitoUserPools: [userPool],
@@ -1104,6 +1147,13 @@ export class Api extends Construct {
         new LambdaIntegration(deleteFileFunction),
         commonAuthorizerProps
       );
+    // POST: /file/convert-pptx
+    const convertPptxResource = fileResource.addResource('convert-pptx');
+    convertPptxResource.addMethod(
+      'POST',
+      new LambdaIntegration(convertPptxToJpegFunction),
+      commonAuthorizerProps
+    );
 
     // GET: /token-usage
     const tokenUsageResource = api.root.addResource('token-usage');

@@ -10,6 +10,23 @@ import {
 import useHttp from './useHttp';
 import axios from 'axios';
 
+export interface ConvertPptxToJpegRequest {
+  bucketName: string;
+  fileKey: string;
+  fileName: string;
+}
+
+export interface ConvertPptxToJpegResponse {
+  message?: string;
+  slideCount: number;
+  images: Array<{
+    slideNumber: number;
+    s3Key: string;
+    fileName: string;
+  }>;
+  error?: string;
+}
+
 const useFileApi = () => {
   const http = useHttp();
   const parseS3Url = (s3Url: string) => {
@@ -46,6 +63,9 @@ const useFileApi = () => {
         headers: { 'Content-Type': 'file/*' },
         data: req.file,
       });
+    },
+    convertPptxToJpeg: async (req: ConvertPptxToJpegRequest) => {
+      return http.post<ConvertPptxToJpegResponse>('file/convert-pptx', req);
     },
     getFileDownloadSignedUrl: async (s3Url: string, s3Type?: S3Type) => {
       const { bucketName, prefix, region } = parseS3Url(s3Url);
